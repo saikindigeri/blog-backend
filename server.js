@@ -1,3 +1,5 @@
+
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -8,39 +10,47 @@ require('dotenv').config();
 
 const app = express();
 
+
 app.use(cors());
 app.use(bodyParser.json());
 
-// MySQL Connection Pool
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USERNAME,
+// MySQL Connection
+const db = mysql.createConnection({
+  host: process.env.DB_HOST, 
+  user: process.env.DB_USERNAME, 
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_DBNAME
+  database: process.env.DB_DBNAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0 
 });
 
-// Create tables if they do not exist
-const createUsersTable = `
-  CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL
-  )
-`;
+db.connect((err) => {
+  if (err) throw err;
+  console.log('MySQL Connected');
+  
+  // Create tables if they do not exist
+  const createUsersTable = `
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password VARCHAR(255) NOT NULL
+    )
+  `;
+  
+  const createBlogsTable = `
+    CREATE TABLE IF NOT EXISTS blogs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      content TEXT NOT NULL,
+      image VARCHAR(255),
+      userId INT,
+      FOREIGN KEY (userId) REFERENCES users(id)
+    )
+  `;
+const createCommentsTable=`
 
-const createBlogsTable = `
-  CREATE TABLE IF NOT EXISTS blogs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    content TEXT NOT NULL,
-    image VARCHAR(255),
-    userId INT,
-    FOREIGN KEY (userId) REFERENCES users(id)
-  )
-`;
-
-const createCommentsTable = `
   CREATE TABLE IF NOT EXISTS comments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     blog_id INT,
@@ -49,29 +59,23 @@ const createCommentsTable = `
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (blog_id) REFERENCES blogs(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )
-`;
-
-// Execute table creation queries in the correct order
-pool.query(createUsersTable, (err) => {
-  if (err) throw err;
-  console.log('Users table created or already exists');
- 
-  pool.query(createBlogsTable, (err) => {
-    if (err) throw err;
-    console.log('Blogs table created or already exists');
- 
-    pool.query(createCommentsTable, (err) => {
-      if (err) throw err;
-      console.log('Comments table created or already exists');
-    });
-  });
-});  
+  )`;
   
 
+db.query(createCommentsTable, (err) => {
+  if (err) throw err;
+  console.log('Comments table created or already exists');
+});
 
-app.listen(process.env.PORT || 5000, () => {
-  console.log(`Server running on port ${process.env.PORT || 5000}`);
+  db.query(createUsersTable, (err) => {
+    if (err) throw err;
+    console.log('Users table created or already exists');
+  });
+
+  db.query(createBlogsTable, (err) => { 
+    if (err) throw err;
+    console.log('Blogs table created or already exists');
+  });
 });
  
 // Middleware
@@ -92,7 +96,7 @@ app.post('/api/register', (req, res) => {
   const { username, email, password } = req.body;
   bcrypt.hash(password, 10, (err, hash) => {
     if (err) throw err;
-    pool.query('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hash], (err) => {
+    db.query('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hash], (err) => {
       if (err) throw err;
       res.status(201).json({ message: 'User registered' });
     });
@@ -101,7 +105,7 @@ app.post('/api/register', (req, res) => {
 
 app.post('/api/login', (req, res) => {
   const { email, password } = req.body;
-  pool.query('SELECT * FROM users WHERE email = ?', [email], (err, results) => {
+  db.query('SELECT * FROM users WHERE email = ?', [email], (err, results) => {
     if (err) throw err;
     if (results.length === 0) return res.status(400).json({ message: 'User not found' });
     const user = results[0];
@@ -120,16 +124,16 @@ app.post('/api/login', (req, res) => {
 app.post('/posts', authenticateJWT, (req, res) => {
   const { title, content, image } = req.body;
   const userId = req.user.id;
-  pool.query('INSERT INTO blogs (title, content, image, userId) VALUES (?, ?, ?, ?)', [title, content, image, userId], function (err) {
+  db.query('INSERT INTO blogs (title, content, image, userId) VALUES (?, ?, ?, ?)', [title, content, image, userId], function (err) {
     if (err) return res.status(400).send('Error creating blog');
     res.status(201).json({ id: this.lastID ,message:"Blog Created Successfully"});
   });
 });
- 
+
 
 
 app.get('/posts', (req, res) => {
-  pool.query('SELECT * FROM blogs', (err, results) => {
+  db.query('SELECT * FROM blogs', (err, results) => {
     if (err) return res.status(400).send('Error fetching blogs');
     res.json(results);
   });
@@ -137,7 +141,7 @@ app.get('/posts', (req, res) => {
 
 app.get('/posts/:id', (req, res) => {
   const { id } = req.params;
-  pool.query('SELECT * FROM blogs WHERE id = ?', [id], (err, results) => {
+  db.query('SELECT * FROM blogs WHERE id = ?', [id], (err, results) => {
     if (err) return res.status(400).send('Error fetching blog');
     if (results.length === 0) return res.status(404).send('Blog not found');
     res.json(results[0]);
@@ -147,7 +151,7 @@ app.get('/posts/:id', (req, res) => {
 app.put('/posts/:id', authenticateJWT, (req, res) => {
   const { title, content, image } = req.body;
   const { id } = req.params;
-  pool.query('UPDATE blogs SET title = ?, content = ?, image = ? WHERE id = ?', [title, content, image, id], (err) => {
+  db.query('UPDATE blogs SET title = ?, content = ?, image = ? WHERE id = ?', [title, content, image, id], (err) => {
     if (err) return res.status(400).send('Error updating blog');
     res.send('Blog updated');
   });
@@ -155,7 +159,7 @@ app.put('/posts/:id', authenticateJWT, (req, res) => {
 
 app.delete('/posts/:id', authenticateJWT, (req, res) => {
   const { id } = req.params;
-  pool.query('DELETE FROM blogs WHERE id = ?', [id], (err) => {
+  db.query('DELETE FROM blogs WHERE id = ?', [id], (err) => {
     if (err) return res.status(400).send('Error deleting blog');
     res.send('Blog deleted');
   });
@@ -171,7 +175,7 @@ app.post('/posts/:id/comments', authenticateJWT, (req, res) => {
     const userId = req.user.id;
   
     const query = 'INSERT INTO comments (blog_id, user_id, text) VALUES (?, ?, ?)';
-    pool.query(query, [id, userId, text], (err, result) => {
+    db.query(query, [id, userId, text], (err, result) => {
       if (err) return res.status(500).json({ message: 'Error adding comment' });
       res.status(201).json({ message: 'Comment added successfully', commentId: result.insertId });
     });
@@ -190,12 +194,12 @@ app.post('/posts/:id/comments', authenticateJWT, (req, res) => {
       ORDER BY created_at DESC
     `;
   
-    pool.query(query, [id], (err, results) => {
+    db.query(query, [id], (err, results) => {
       if (err) return res.status(500).json({ message: 'Error fetching comments' });
       res.json(results);
     });
   });
   
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
