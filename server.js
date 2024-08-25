@@ -213,7 +213,7 @@ const mysql = require('mysql2');
 require('dotenv').config();
 
 const app = express();
-
+ 
 app.use(cors());
 app.use(bodyParser.json());
 
@@ -379,7 +379,7 @@ app.get('/posts/:id/comments', (req, res) => {
     WHERE blog_id = ?
     ORDER BY created_at DESC
   `;
- 
+  
   pool.query(query, [id], (err, results) => {
     if (err) return res.status(500).json({ message: 'Error fetching comments' });
     res.json(results);
