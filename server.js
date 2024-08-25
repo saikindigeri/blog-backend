@@ -216,7 +216,7 @@ const app = express();
  
 app.use(cors());
 app.use(bodyParser.json());
-
+app.use(express.urlencoded({extended: false}))
 // MySQL Connection Pool
 const pool = mysql.createPool({
   host: process.env.DB_HOST, 
@@ -227,7 +227,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0 
 });
-
+ 
 // Creating tables
 pool.query(`
   CREATE TABLE IF NOT EXISTS users (
