@@ -217,7 +217,8 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.urlencoded({extended: false}))
-// MySQL Connection Pool
+
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST, 
   user: process.env.DB_USERNAME, 
